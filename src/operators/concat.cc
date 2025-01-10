@@ -10,17 +10,21 @@ ConcatObj::ConcatObj(GraphObj *graph, TensorVec inputs, Tensor output, int _dim)
 }
 
 optional<vector<Shape>> ConcatObj::inferShape(const TensorVec &inputs) {
-  Shape dims = inputs[0]->getDims();
+  Shape dims(inputs[0]->getDims());
   auto rank = inputs[0]->getRank();
 
   dims[dim] = 0;
   for (const auto &input : inputs) {
-    IT_ASSERT(input->getRank() == rank);
+    if (input->getRank() != rank) {
+      return std::nullopt;
+    }
     for (size_t i = 0; i < rank; i++) {
       if (i == static_cast<size_t>(dim)) {
         dims[i] += input->getDims()[i];
       } else {
-        IT_ASSERT(dims[i] == input->getDims()[i]);
+        if (dims[i] != input->getDims()[i]) {
+          return std::nullopt;
+        }
       }
     }
   }

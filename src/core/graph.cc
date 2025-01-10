@@ -126,12 +126,17 @@ void GraphObj::dataMalloc() {
   // topological sorting first
   IT_ASSERT(topo_sort() == true);
 
+  std::vector<size_t> offsets;
+  // Add all the tensors to the allocator
+  for (const auto &tensor : tensors) {
+    offsets.push_back(allocator.alloc(tensor->getBytes()));
+  }
+
   const auto base = reinterpret_cast<char *>(allocator.getPtr());
 
-  for (const auto &tensor : tensors) {
-    const auto offset = allocator.alloc(tensor->getBytes());
-    auto data = reinterpret_cast<void *>(base + offset);
-    tensor->setDataBlob(make_ref<BlobObj>(runtime, data));
+  for (size_t i = 0; i < tensors.size(); ++i) {
+    auto tensor = tensors[i];
+    tensor->setDataBlob(make_ref<BlobObj>(runtime, base + offsets[i]));
   }
 
   allocator.info();
@@ -188,13 +193,12 @@ bool GraphObj::checkValid() const {
   }
   std::set<UidBaseType> s;
   // check whether two tensors with the same FUID exist
-  for (auto tensor : tensors)
-        {
-            int cnt = s.count(tensor->getFuid());
-            IT_ASSERT(cnt == 0, std::to_string(tensor->getFuid()));
-            s.insert(tensor->getFuid());
-        }
-        return true;
-    }
+  for (auto tensor : tensors) {
+    int cnt = s.count(tensor->getFuid());
+    IT_ASSERT(cnt == 0, std::to_string(tensor->getFuid()));
+    s.insert(tensor->getFuid());
+  }
+  return true;
+}
 
 } // namespace infini
