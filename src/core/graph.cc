@@ -192,6 +192,7 @@ void GraphObj::optimize() {
           transpose_op->getInputs(0)->addTarget(matmul_op);
 
           // Op connections
+          matmul_op->removePredecessors(transpose_op);
           for (auto pred : transpose_op->getPredecessors()) {
             matmul_op->addPredecessors(pred);
             pred->addSuccessors(matmul_op);
