@@ -1,4 +1,6 @@
 #include "core/graph.h"
+#include "operators/matmul.h"
+#include "operators/transpose.h"
 #include <algorithm>
 #include <numeric>
 #include <queue>
@@ -92,6 +94,126 @@ void GraphObj::optimize() {
   // 合并算子（例如，矩阵乘算子中含有属性transA、transB，如果其输入存在transpose，且对最后两个维度做交换，就可以将transpose融入到矩阵乘算子的属性中去）
   // =================================== 作业
   // ===================================
+
+  using namespace infini;
+
+  // Keep looping until no more optimization can be done
+  bool optimized = true;
+  while (optimized) {
+    optimized = false;
+    for (auto it = ops.begin(); it != ops.end(); ++it) {
+      const auto op = *it;
+
+      if (op->type == OpType::Transpose) {
+        // 1. Two consecutive transpose operators should be simplified
+        auto next = std::next(it);
+        if (next != ops.end() && next->get()->type == OpType::Transpose) {
+          auto next_op = *next;
+          auto perm1 = as<TransposeObj>(op)->getPermute();
+          auto perm2 = as<TransposeObj>(next_op)->getPermute();
+          auto perm = perm1;
+          for (size_t i = 0; i < perm.size(); ++i) {
+            perm[i] = perm2[perm1[i]];
+          }
+          auto naive = std::all_of(perm.begin(), perm.end(),
+                                   [i = 0](int p) mutable { return p == i++; });
+
+          if (naive) {
+            // Delete both
+            op->getInputs(0)->removeTarget(op);
+            for (auto succ : next_op->getSuccessors()) {
+              op->getInputs(0)->addTarget(succ);
+              succ->removePredecessors(next_op);
+              succ->replaceInput(next_op->getOutput(), op->getInputs(0));
+            }
+
+            for (auto pred : op->getPredecessors()) {
+              next_op->getOutputs()[0]->setSource(op);
+              pred->removeSuccessors(op);
+            }
+
+            if (next_op->getSuccessors().size() != 0 &&
+                op->getPredecessors().size() != 0) {
+              for (auto succ : next_op->getSuccessors()) {
+                for (auto pred : op->getPredecessors()) {
+                  pred->addSuccessors(succ);
+                  succ->addPredecessors(pred);
+                }
+              }
+            }
+
+            removeTensor(next_op->getOutput());
+            removeTensor(op->getOutput());
+            removeOperator(next_op);
+            removeOperator(op);
+          } else {
+            auto newOp = addOpWithOutputs<TransposeObj>(
+                op->getInputs(0), next_op->getOutput(), perm);
+
+            op->getInputs(0)->removeTarget(op);
+            for (auto pred : op->getPredecessors()) {
+              pred->removeSuccessors(op);
+            }
+
+            for (auto succ : next_op->getSuccessors()) {
+              succ->removePredecessors(next_op);
+            }
+            removeTensor(op->getOutput());
+            removeOperator(op);
+            removeOperator(next_op);
+          }
+
+          optimized = true;
+          break;
+        }
+      }
+
+      //      if (op->type == OpType::MatMul) {
+      //        // 2. Merge transpose operators into matmul operators
+      //        const auto &matmul_op = as<MatmulObj>(op);
+      //        const auto &inputs = matmul_op->getInputs();
+      //        // check if inputs have a transpose operator for last two
+      //        dimensions for (const auto &input : inputs) {
+      //          if (input->getSource()->type != OpType::Transpose)
+      //            continue;
+      //          const auto &transpose_op =
+      //          as<TransposeObj>(input->getSource());
+      //
+      //          // Other dimensions should not be transposed
+      //          auto perm = transpose_op->getPermute();
+      //          if (!std::all_of(perm.begin(), perm.begin() + perm.size() -
+      //          2,
+      //                           [i = 0](int p) mutable { return p == i++;
+      //                           }))
+      //            continue;
+      //
+      //          // Last two dimensions should be transposed
+      //          if (perm[perm.size() - 1] - perm[perm.size() - 2] == 1)
+      //            continue;
+      //
+      //          // Merge transpose into matmul
+      //          if (input == inputs[0]) {
+      //            matmul_op->setTransA(!matmul_op->getTransA());
+      //          } else {
+      //            matmul_op->setTransB(!matmul_op->getTransB());
+      //          }
+      //
+      //          // Connect the matmul with the input of the transpose
+      //          operator matmul_op->replaceInput(input,
+      //          transpose_op->getInputs()[0]);
+      //          transpose_op->getInputs()[0]->removeTarget(transpose_op);
+      //          transpose_op->getInputs()[0]->addTarget(matmul_op);
+      //
+      //          // Delete the transpose operator
+      //          this->removeTensor(transpose_op->getOutputs()[0]);
+      //          this->removeOperator(transpose_op);
+      //
+      //          optimized = true;
+      //        }
+      //      }
+      // Finish the optimization
+    }
+  }
 }
 
 Tensor GraphObj::getTensor(int fuid) const {
